@@ -11,8 +11,8 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKe
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.exceptions import TelegramBadRequest, TelegramAPIError
 # storm
-BOT_TOKEN = "8149308999:AAFb9bW-9xPyG9Ehkx5-0cJ_Jk5hhZckL7Y"
-ADMIN_ID = 7896190704
+BOT_TOKEN = "8144561331:AAHz-5ya0LGZD8zp_DD8dBagF0tp174mK20"
+ADMIN_ID = 8289508688
 # storm
 DATA_FILE = "bot_data.json"
 # storm
@@ -393,4 +393,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
