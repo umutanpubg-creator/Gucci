@@ -19,10 +19,10 @@ MARZBAN_USERNAME = "komutan31"  # Marzban admin kullanıcı adı
 MARZBAN_PASSWORD = "admin"  # Marzban admin şifresi
 
 # VPS SSH Bilgileri (node script'ini kurmak için)
-VPS_IP = ""  # Node'un kurulu olduğu VPS IP
+VPS_IP = "5.42.117.80"  # Node'un kurulu olduğu VPS IP
 SSH_USERNAME = "root"
-SSH_PASSWORD = "VPS_SIFRESI"  # Veya SSH key kullanabilirsiniz
-NODE_SCRIPT_URL = "https://raw.githubusercontent.com/Marzban/node-script/main/install.sh"  # Node script URL
+SSH_PASSWORD = "t6-rvs-tTHKYB5"  # Veya SSH key kullanabilirsiniz
+NODE_SCRIPT_URL = "https://github.com/Gozargah/Marzban-scripts/raw/master/marzban-node.sh"  # Node script URL
 
 # Conversation States
 (IP_SOR, SIFRE_SOR) = range(2)
