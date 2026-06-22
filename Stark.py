@@ -8,7 +8,7 @@ import requests
 # 🛠️ DEĞİŞTİRMEN GEREKEN ALANLAR
 # =====================================================================
 API_TOKEN = '8826147048:AAFkZlZOKsS43RWrFXALU90XHO5sviSJkg0'  # @BotFather'dan aldığın bot tokenı
-MASTER_PANEL_API = "https://vip.fastline-tm-belet-film.ru/api"  # Marzban API linkin
+MASTER_PANEL_API = "https://vip.fastline-tm-belet-film.ru:8000/api"  # Marzban API linkin
 MASTER_ADMIN_USERNAME = "komutan31"  # Marzban panel kullanıcı adın
 MASTER_ADMIN_PASSWORD = "admin"  # Marzban panel şifren
 # =====================================================================
