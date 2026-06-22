@@ -1,7 +1,5 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-import paramiko
-import time
 import requests
 
 # =====================================================================
@@ -9,8 +7,8 @@ import requests
 # =====================================================================
 API_TOKEN = '8826147048:AAFkZlZOKsS43RWrFXALU90XHO5sviSJkg0'  # @BotFather'dan aldığın bot tokenı
 MASTER_PANEL_API = "https://vip.fastline-tm-belet-film.ru:8000/api"  # Marzban API linkin
-MASTER_ADMIN_USERNAME = "komutan31"  # Marzban panel kullanıcı adın
-MASTER_ADMIN_PASSWORD = "admin"  # Marzban panel şifren
+MASTER_ADMIN_USERNAME = "komutan31"  # Ana panel süper admin kullanıcı adın
+MASTER_ADMIN_PASSWORD = "admin"  # Ana panel süper admin şifren
 # =====================================================================
 
 bot = telebot.TeleBot(API_TOKEN)
@@ -26,225 +24,217 @@ def get_marzban_token():
     except Exception:
         return None
 
-# --- ANA MENÜ KLAVYENİZ ---
+# --- ANA MENÜ (START) ---
 def main_menu():
     markup = InlineKeyboardMarkup()
-    markup.row(InlineKeyboardButton("🖥️ Node Listesi (Durum/Trafik)", callback_data="node_listesi_goruntule"))
-    markup.row(InlineKeyboardButton("🔄 IP Değiştir (Node Seç)", callback_data="ip_degistir_secim"))
+    markup.row(InlineKeyboardButton("👥 Panel Adminleri", callback_data="adminleri_listele"))
+    markup.row(InlineKeyboardButton("🌐 Hostlar ve IP Değiştir", callback_data="hostlari_listele"))
     return markup
 
-# --- PANEL BAŞLANGICI (/start veya /panel) ---
 @bot.message_handler(commands=['panel', 'start'])
 def send_welcome(message):
     panel_text = (
-        "🛡️ **GÜVENLİK KONTROL PANELİ**\n\n"
-        "Lütfen yapmak istediğiniz işlemi aşağıdaki menüden seçin:"
+        "🛡️ **MARZBAN GELİŞMİŞ KONTROL PANELİ**\n\n"
+        "Sisteme başarıyla bağlanıldı. Lütfen işlem yapmak istediğiniz menüyü seçin 👇"
     )
     bot.send_message(message.chat.id, panel_text, parse_mode="Markdown", reply_markup=main_menu())
 
-# --- ÖZELLİK 1: NODE LİSTESİNİ BUTON OLARAK GÖSTERME ---
-@bot.callback_query_handler(func=lambda call: call.data == "node_listesi_goruntule")
-def show_nodes_status(call):
+# =====================================================================
+# 👥 BÖLÜM 1: PANEL ADMİNLERİ YÖNETİMİ
+# =====================================================================
+
+@bot.callback_query_handler(func=lambda call: call.data == "adminleri_listele")
+def list_admins(call):
     chat_id = call.message.chat.id
     token = get_marzban_token()
-    
     if not token:
-        bot.answer_callback_query(call.id, "❌ Panel API bağlantısı başarısız!", show_alert=True)
+        bot.answer_callback_query(call.id, "❌ API bağlantısı başarısız!", show_alert=True)
         return
 
     try:
         headers = {"Authorization": f"Bearer {token}"}
-        nodes_response = requests.get(f"{MASTER_PANEL_API}/nodes", headers=headers, timeout=10).json()
+        # Paneldeki tüm adminleri çekiyoruz
+        admins = requests.get(f"{MASTER_PANEL_API}/admins", headers=headers, timeout=10).json()
         
         markup = InlineKeyboardMarkup()
-        
-        for node in nodes_response:
-            status = node.get("status", "disconnected")
-            status_emoji = "🟢" if status == "connected" else "🟡" if status == "connecting" else "🔴"
-            node_name = node.get("name", "Bilinmeyen Node")
-            node_id = node.get("id")
-            
-            markup.add(InlineKeyboardButton(f"{status_emoji} {node_name}", callback_data=f"node_detay_{node_id}"))
+        for admin in admins:
+            username = admin.get("username")
+            # Süper admini listede korumak veya ayırt etmek için emoji ekleyebiliriz
+            role_emoji = "👑" if admin.get("is_sudo") else "👨‍💻"
+            markup.add(InlineKeyboardButton(f"{role_emoji} {username}", callback_data=f"adm_detay_{username}"))
             
         markup.add(InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data="ana_menuye_don"))
-        
-        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, 
-                              text="🖥️ **Mevcut Marzban Nodeları:**\n\nCanlı trafik ve bağlantı durumunu görmek için bir node seçin:", 
+        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id,
+                              text="👥 **Panelde Kayıtlı Tüm Adminler:**\n\nDetayları görmek ve yönetmek için bir admin seçin:",
                               reply_markup=markup, parse_mode="Markdown")
-                              
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Node listesi alınırken hata oluştu: `{str(e)}`")
+        bot.send_message(chat_id, f"❌ Admin listesi alınamadı: `{str(e)}`")
 
-# --- ÖZELLİK 2: SEÇİLEN NODE'UN DETAYLI DURUM VE TRAFİK BİLGİSİ ---
-@bot.callback_query_handler(func=lambda call: call.data.startswith("node_detay_"))
-def show_node_details(call):
+@bot.callback_query_handler(func=lambda call: call.data.startswith("adm_detay_"))
+def show_admin_details(call):
     chat_id = call.message.chat.id
-    node_id = call.data.split("_")[2]
+    target_username = call.data.split("_")[2]
     token = get_marzban_token()
-    
+
     try:
         headers = {"Authorization": f"Bearer {token}"}
-        node = requests.get(f"{MASTER_PANEL_API}/node/{node_id}", headers=headers, timeout=10).json()
+        # Admin detayını ve onun altındaki kullanıcıları çekmek için /users endpointini filtreleyebiliriz
+        # Marzban API'de doğrudan admin bazlı istatistik ve o adminin oluşturduğu kullanıcı listesi çekilir:
+        all_users = requests.get(f"{MASTER_PANEL_API}/users", headers=headers, timeout=10).json().get("users", [])
         
-        total_bytes = node.get("uplink", 0) + node.get("downlink", 0)
-        total_gb = total_bytes / (1024 ** 3)
-        uplink_gb = node.get("uplink", 0) / (1024 ** 3)
-        downlink_gb = node.get("downlink", 0) / (1024 ** 3)
+        # Seçilen adminin oluşturduğu kullanıcıları ayıklıyoruz
+        admin_users = [u for u in all_users if u.get("admin", {}).get("username") == target_username]
         
-        status = node.get("status", "disconnected")
-        status_text = "Bağlı 🟢" if status == "connected" else "Bağlanıyor 🟡" if status == "connecting" else "Bağlantı Yok 🔴"
+        user_count = len(admin_users)
+        total_bytes = sum([u.get("used_traffic", 0) for u in admin_users])
+        total_gb = round(total_bytes / (1024 ** 3), 2)
         
-        detay_mesaj = (
-            f"🖥️ **NODE DETAYLARI: {node.get('name')}**\n\n"
-            f"🌐 **IP Adresi:** `{node.get('address')}`\n"
-            f"🔌 **Port:** `{node.get('port')}`\n"
-            f"⚡ **Sistem Durumu:** {status_text}\n\n"
-            f"📊 **Trafik Tüketimi:**\n"
-            f"🔼 Yükleme (Uplink): {round(uplink_gb, 2)} GB\n"
-            f"🔽 İndirme (Downlink): {round(downlink_gb, 2)} GB\n"
-            f"📈 **Toplam Trafik:** {round(total_gb, 2)} GB"
+        # Kullanıcı isimlerini sıralı listeleme
+        user_names_list = ""
+        for idx, u in enumerate(admin_users, 1):
+            user_names_list += f"{idx}. `{u.get('username')}`\n"
+        
+        if not user_names_list:
+            user_names_list = "_Bu admin henüz hiç kullanıcı oluşturmamış._"
+
+        detay_metni = (
+            f"👤 **ADMİN İSTATİSTİKLERİ: {target_username}**\n\n"
+            f"📊 **Üretilen Toplam Kullanıcı:** {user_count}\n"
+            f"📉 **Kullanıcıların Toplam Trafiği:** {total_gb} GB\n\n"
+            f"📋 **Oluşturulan Kullanıcı Listesi:**\n{user_names_list}"
         )
         
         markup = InlineKeyboardMarkup()
-        markup.row(InlineKeyboardButton("🔄 Bu Node'un IP'sini Değiştir", callback_data=f"node_select_{node_id}"))
-        markup.row(InlineKeyboardButton("⬅️ Node Listesine Dön", callback_data="node_listesi_goruntule"))
+        # Kendini silmesini engellemek için küçük bir önlem
+        if target_username != MASTER_ADMIN_USERNAME:
+            markup.row(InlineKeyboardButton("🗑️ Admini Sil (CLI Delete)", callback_data=f"adm_sil_{target_username}"))
+        markup.row(InlineKeyboardButton("⬅️ Admin Listesine Dön", callback_data="adminleri_listele"))
         
-        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, 
-                              text=detay_mesaj, reply_markup=markup, parse_mode="Markdown")
-                              
+        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id,
+                              text=detay_metni, reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Node detayları alınamadı: `{str(e)}`")
+        bot.send_message(chat_id, f"❌ Admin detayları işlenirken hata oluştu: `{str(e)}`")
 
-# --- ÖZELLİK 3: IP DEĞİŞTİRMEK İÇİN NODE SEÇİM MENÜSÜ ---
-@bot.callback_query_handler(func=lambda call: call.data == "ip_degistir_secim")
-def choose_node_for_ip(call):
+@bot.callback_query_handler(func=lambda call: call.data.startswith("adm_sil_"))
+def delete_admin_execute(call):
+    chat_id = call.message.chat.id
+    target_username = call.data.split("_")[2]
+    token = get_marzban_token()
+
+    try:
+        headers = {"Authorization": f"Bearer {token}"}
+        # marzban cli admin delete komutunun API karşılığı
+        res = requests.delete(f"{MASTER_PANEL_API}/admin/{target_username}", headers=headers, timeout=10)
+        
+        if res.status_code in [200, 204]:
+            bot.answer_callback_query(call.id, f"✅ {target_username} başarıyla silindi!", show_alert=True)
+            list_admins(call)
+        else:
+            bot.answer_callback_query(call.id, "❌ Admin silinemedi (Yetki yetersiz veya sistem hatası).", show_alert=True)
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Silme işlemi başarısız: `{str(e)}`")
+
+
+# =====================================================================
+# 🌐 BÖLÜM 2: HOSTLAR VE TOPLU IP DEĞİŞTİRME YÖNETİMİ
+# =====================================================================
+
+@bot.callback_query_handler(func=lambda call: call.data == "hostlari_listele")
+def list_hosts(call):
     chat_id = call.message.chat.id
     token = get_marzban_token()
-    
     if not token:
-        bot.answer_callback_query(call.id, "❌ Panel API bağlantısı başarısız!", show_alert=True)
+        bot.answer_callback_query(call.id, "❌ API bağlantısı başarısız!", show_alert=True)
         return
 
     try:
         headers = {"Authorization": f"Bearer {token}"}
-        nodes_response = requests.get(f"{MASTER_PANEL_API}/nodes", headers=headers, timeout=10).json()
+        # Paneldeki mevcut host ayarlarını çekiyoruz (vless-xhttp, vless-tcp, shadowsocks-tcp vb.)
+        hosts_data = requests.get(f"{MASTER_PANEL_API}/hosts", headers=headers, timeout=10).json()
         
-        markup = InlineKeyboardMarkup()
-        for node in nodes_response:
-            markup.add(InlineKeyboardButton(f"🖥️ {node.get('name')} ({node.get('address')})", callback_data=f"node_select_{node.get('id')}"))
+        host_detay_metni = "🌐 **MEVCUT PANEL HOSTLARI VE GİRİŞLERİ**\n\n"
+        
+        # Fotoğraftaki gibi gelen tüm inbound gruplarını ve içindeki host detaylarını metne döküyoruz
+        for inbound, hosts in hosts_data.items():
+            host_detay_metni += f"🔹 **İnbound Grubu:** `{inbound}`\n"
+            if not hosts:
+                host_detay_metni += " └ ⚠️ _Bu gruba tanımlı host bulunmuyor._\n\n"
+                continue
+                
+            for h in hosts:
+                host_detay_metni += (
+                    f" ├ 📍 Remark: `{h.get('remark', 'Yok')}`\n"
+                    f" ├ 🔗 Adres (IP/Domain): `{h.get('address')}`\n"
+                    f" └ 🔌 Port: `{h.get('port', 'Default')}`\n"
+                )
+            host_detay_metni += "\n"
             
-        markup.add(InlineKeyboardButton("⬅️ Ana Menü", callback_data="ana_menuye_don"))
-        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, 
-                              text="📝 Hangi Node'un IP adresini değiştirmek ve sıfırdan kurmak istiyorsunuz?", reply_markup=markup)
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🔄 Tüm Hostların IP'sini Değiştir", callback_data="toplu_ip_degistir_istek"))
+        markup.row(InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data="ana_menuye_don"))
+        
+        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id,
+                              text=host_detay_metni, reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Liste alınırken hata oluştu: `{str(e)}`")
+        bot.send_message(chat_id, f"❌ Host listesi alınırken hata oluştu: `{str(e)}`")
 
-# Seçilen Node'u kaydedip IP isteme adımı
-@bot.callback_query_handler(func=lambda call: call.data.startswith("node_select_"))
-def node_selected(call):
+@bot.callback_query_handler(func=lambda call: call.data == "toplu_ip_degistir_istek")
+def request_new_ip_for_hosts(call):
     chat_id = call.message.chat.id
-    selected_node_id = call.data.split("_")[2]
-    
-    user_data[chat_id] = {'node_id': selected_node_id}
-    
-    msg = bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, 
-                                text="🚀 Seçim başarılı. Şimdi yeni kuracağınız **VPS IP Adresini** yazın:")
-    bot.register_next_step_handler(msg, get_new_ip)
+    msg = bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id,
+                                text="🚀 **TOPLU HOST IP GÜNCELLEME**\n\nLütfen tüm hostlara atanacak **Yeni IP Adresini** yazın:")
+    bot.register_next_step_handler(msg, execute_bulk_ip_change)
 
-def get_new_ip(message):
+def execute_bulk_ip_change(message):
     chat_id = message.chat.id
-    user_data[chat_id]['new_ip'] = message.text.strip()
+    new_ip = message.text.strip()
+    token = get_marzban_token()
     
-    msg = bot.send_message(chat_id, "🔑 Yeni VPS sunucusunun **root şifresini** yazın:")
-    bot.register_next_step_handler(msg, start_automation)
-
-# --- ÖZELLİK 4: SSH OTOMASYONU VE GÜNCEL SCRIPT KURULUM MOTORU ---
-def start_automation(message):
-    chat_id = message.chat.id
-    user_data[chat_id]['vps_password'] = message.text.strip()
-    
-    node_id = user_data[chat_id]['node_id']
-    new_ip = user_data[chat_id]['new_ip']
-    vps_pass = user_data[chat_id]['vps_password']
-    
-    status_msg = bot.send_message(chat_id, "⏳ Otomasyon başlatıldı...\n1. Ana sunucudan güvenlik sertifikası alınıyor...")
+    status_msg = bot.send_message(chat_id, "⏳ Hostlar taranıyor ve IP adresleri değiştiriliyor...")
     
     try:
-        # SÜREÇ 1: Sertifikayı ana panel API'sinden çekme
-        cert_text = get_marzban_certificate() 
+        headers = {"Authorization": f"Bearer {token}"}
+        # Önce mevcut host yapısını çekiyoruz
+        hosts_data = requests.get(f"{MASTER_PANEL_API}/hosts", headers=headers, timeout=10).json()
         
-        bot.edit_message_text(chat_id=chat_id, message_id=status_msg.message_id, 
-                              text=f"⏳ [1/3] Sertifika başarıyla alındı.\n2. `{new_ip}` VPS'ine SSH bağlantısı kuruluyor ve yeni script yükleniyor...")
-
-        # SÜREÇ 2: SSH Bağlantısı ve Kurulum
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(hostname=new_ip, username='root', password=vps_pass, timeout=15)
+        # Tüm inbound gruplarındaki hostların adres bilgisini yeni IP ile güncelliyoruz
+        updated_hosts_data = {}
+        for inbound, hosts in hosts_data.items():
+            updated_hosts_data[inbound] = []
+            for h in hosts:
+                h['address'] = new_ip  # IP adresini değiştiriyoruz
+                updated_hosts_data[inbound].append(h)
+                
+        # API'ye güncellenmiş yeni host listesini gönderiyoruz (Fotoğraftaki 'Apply' butonunun tetiklediği işlem)
+        res = requests.put(f"{MASTER_PANEL_API}/hosts", json=updated_hosts_data, headers=headers, timeout=10)
         
-        # SİZİN VERDİĞİNİZ GÜNCEL SCRIPT BURAYA EKLENDİ (Onay sorusunu geçmek için echo "y" entegre edildi)
-        install_cmd = 'echo "y" | sudo bash -c "$(curl -sL https://github.com/Gozargah/Marzban-scripts/raw/master/marzban-node.sh)" @ install'
-        stdin, stdout, stderr = ssh.exec_command(install_cmd)
-        stdout.channel.recv_exit_status()  # Kurulum bitene kadar akışı bekletir
-        
-        # SÜREÇ 3: Sertifikayı otomatik dosyaya yazma
-        cert_write_cmd = f"echo '{cert_text}' > /var/lib/marzban-node/ssl_client_cert.pem"
-        ssh.exec_command(cert_write_cmd)
-        
-        # Node servisini yenileyerek sertifikayı okumasını sağlama
-        ssh.exec_command("marzban-node restart")
-        ssh.close()
-        
-        bot.edit_message_text(chat_id=chat_id, message_id=status_msg.message_id, 
-                              text=f"⏳ [2/3] Yeni script kuruldu ve sertifika işlendi.\n3. Marzban panelindeki (Master) IP adresi güncelleniyor...")
-
-        # SÜREÇ 4: Ana Panel API'si üzerinden IP'yi güncelleme
-        update_node_ip_on_master(node_id, new_ip)
-        
-        # Başarılı Sonuçlandırma ve Ana Menü Kısayolu
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data="ana_menuye_don"))
-        
-        bot.edit_message_text(chat_id=chat_id, message_id=status_msg.message_id, 
-                              text=f"✅ **İŞLEM BAŞARIYLA TAMAMLANDI!**\n\n• İstediğiniz güncel `Marzban-scripts` kurularak bağlandı.\n• Sertifika otomatik entegre edildi.\n• Panel üzerindeki IP adresi `{new_ip}` olarak güncellendi! 🟢",
-                              reply_markup=markup)
-
+        if res.status_code in [200, 204]:
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data="ana_menuye_don"))
+            bot.edit_message_text(chat_id=chat_id, message_id=status_msg.message_id,
+                                  text=f"✅ **İŞLEM TAMAMLANDI!**\n\nFotoğraftaki tüm inbound alanlarının (`vless-xhttp`, `vless-tcp`, `shadowsocks-tcp` vb.) IP adresleri başarıyla `{new_ip}` olarak güncellendi ve kaydedildi! ⚡",
+                                  reply_markup=markup)
+        else:
+            bot.edit_message_text(chat_id=chat_id, message_id=status_msg.message_id,
+                                  text="❌ API güncelleme isteğini reddetti. Yapılandırmanızı kontrol edin.")
     except Exception as e:
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("⬅️ Ana Menüye Dön", callback_data="ana_menuye_don"))
-        bot.edit_message_text(chat_id=chat_id, message_id=status_msg.message_id, 
-                              text=f"❌ **HATA OLUŞTU**\nSüreç kesintiye uğradı: `{str(e)}`", reply_markup=markup)
+        bot.edit_message_text(chat_id=chat_id, message_id=status_msg.message_id,
+                              text=f"❌ Toplu IP güncellenirken hata oluştu: `{str(e)}`")
 
-# --- YARDIMCI API ARAÇLARI ---
-def get_marzban_certificate():
-    token = get_marzban_token()
-    headers = {"Authorization": f"Bearer {token}"}
-    cert_response = requests.get(f"{MASTER_PANEL_API}/node/settings", headers=headers, timeout=10).json()
-    return cert_response.get("ssl_client_cert")
 
-def update_node_ip_on_master(node_id, new_ip):
-    token = get_marzban_token()
-    headers = {"Authorization": f"Bearer {token}"}
-    node_url = f"{MASTER_PANEL_API}/node/{node_id}"
-    
-    current_node = requests.get(node_url, headers=headers, timeout=10).json()
-    
-    payload = {
-        "name": current_node.get("name"),
-        "address": new_ip,
-        "port": current_node.get("port", 62050),
-        "api_port": current_node.get("api_port", 62051),
-        "usage_ratio": current_node.get("usage_ratio", 1)
-    }
-    requests.put(node_url, json=payload, headers=headers, timeout=10)
-
-# Geri dönüş callback'i
+# =====================================================================
+# 🔄 YARDIMCI GEÇİŞ CALLBACK HANDLERI
+# =====================================================================
 @bot.callback_query_handler(func=lambda call: call.data == "ana_menuye_don")
 def back_to_main(call):
-    panel_text = "🛡️ **GÜVENLİK KONTROL PANELİ**\n\nLütfen yapmak istediğiniz işlemi aşağıdaki menüden seçin:"
-    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, 
+    panel_text = (
+        "🛡️ **MARZBAN GELİŞMİŞ KONTROL PANELİ**\n\n"
+        "Sisteme başarıyla bağlanıldı. Lütfen işlem yapmak istediğiniz menüyü seçin 👇"
+    )
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
                           text=panel_text, reply_markup=main_menu(), parse_mode="Markdown")
 
 # --- BOTU BAŞLAT ---
 if __name__ == '__main__':
-    print("🤖 Marzban Yönetim Botu aktif ve çalışıyor...")
+    print("🤖 Marzban API Kontrol Botu aktif ve istekleri dinliyor...")
     bot.infinity_polling()
